@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+import sys
 from tqdm import tqdm
 import re
 import ast
@@ -22,6 +23,49 @@ GAIA_SOURCES_PARQUET_FILENAME = "sources.parquet"
 MERGED_DATA_PARQUET_FILENAME = "merged_data.parquet"
 
 SPECTRA_SAMPLING = np.linspace(0., 60., 100)
+VALID_ALGORITHMS = {"UMAP", "PCA", "AE", "AE_CONV"}
+VALID_BOTTLENECKS = {3, 5, 10}
+
+def parse_cli_args():
+    if len(sys.argv) != 3:
+        raise ValueError(
+            "Uso: python script_master_work.py <ALGORITMO> <BOTTLENECK>. "
+            "ALGORITMO: UMAP|PCA|AE|AE_CONV. BOTTLENECK: 3|5|10."
+        )
+
+    algorithm = sys.argv[1].upper()
+    if algorithm not in VALID_ALGORITHMS:
+        raise ValueError(
+            f"Algoritmo inválido: {algorithm}. "
+            "Valores permitidos: UMAP, PCA, AE, AE_CONV."
+        )
+
+    try:
+        bottleneck = int(sys.argv[2])
+    except ValueError as exc:
+        raise ValueError(
+            f"Bottleneck inválido: {sys.argv[2]}. Debe ser un entero (3, 5 o 10)."
+        ) from exc
+
+    if bottleneck not in VALID_BOTTLENECKS:
+        raise ValueError(
+            f"Bottleneck inválido: {bottleneck}. Valores permitidos: 3, 5, 10."
+        )
+
+    return algorithm, bottleneck
+
+def run_selected_algorithm(algorithm, bottleneck):
+    # TODO: aquí conectarás las funciones reales de cada algoritmo.
+    if algorithm == "UMAP":
+        print(f"[Switch] Ejecutar UMAP con bottleneck={bottleneck}")
+    elif algorithm == "PCA":
+        print(f"[Switch] Ejecutar PCA con bottleneck={bottleneck}")
+    elif algorithm == "AE":
+        print(f"[Switch] Ejecutar AE con bottleneck={bottleneck}")
+    elif algorithm == "AE_CONV":
+        print(f"[Switch] Ejecutar AE_CONV con bottleneck={bottleneck}")
+    else:
+        raise ValueError(f"Algoritmo no soportado: {algorithm}")
 
 def process_gaia_sources():
     df_gaia = pd.read_csv(f"{GAIA_SOURCES_FILENAME}")
@@ -95,6 +139,10 @@ def reduce_spectra_by_wavelength(df_spectra):
 ####################################
 #              Main                #
 ####################################
+
+SELECTED_ALGORITHM, BOTTLENECK_DIM = parse_cli_args()
+print(f"Algoritmo seleccionado: {SELECTED_ALGORITHM}")
+print(f"Dimensión bottleneck: {BOTTLENECK_DIM}")
 
 #Check if exist spectra parquet, if not, process the spectra files
 df_spectra = pd.DataFrame()
@@ -275,3 +323,4 @@ plt.close()
 
 print(len(wl_bp))
 print(len(wl_rp))
+run_selected_algorithm(SELECTED_ALGORITHM, BOTTLENECK_DIM)
