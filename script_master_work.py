@@ -55,17 +55,33 @@ def parse_cli_args():
     return algorithm, bottleneck
 
 def run_selected_algorithm(algorithm, bottleneck):
-    # TODO: aquí conectarás las funciones reales de cada algoritmo.
+    # Dispatcher central para enrutar a cada implementación.
     if algorithm == "UMAP":
-        print(f"[Switch] Ejecutar UMAP con bottleneck={bottleneck}")
+        run_umap(bottleneck)
     elif algorithm == "PCA":
-        print(f"[Switch] Ejecutar PCA con bottleneck={bottleneck}")
+        run_pca(bottleneck)
     elif algorithm == "AE":
-        print(f"[Switch] Ejecutar AE con bottleneck={bottleneck}")
+        run_ae(bottleneck)
     elif algorithm == "AE_CONV":
-        print(f"[Switch] Ejecutar AE_CONV con bottleneck={bottleneck}")
+        run_ae_conv(bottleneck)
     else:
         raise ValueError(f"Algoritmo no soportado: {algorithm}")
+
+def run_umap(bottleneck):
+    """Stub para futura implementación de UMAP."""
+    print(f"[Stub] UMAP pendiente de implementar (bottleneck={bottleneck})")
+
+def run_pca(bottleneck):
+    """Stub para futura implementación de PCA."""
+    print(f"[Stub] PCA pendiente de implementar (bottleneck={bottleneck})")
+
+def run_ae(bottleneck):
+    """Stub para futura implementación de Autoencoder denso."""
+    print(f"[Stub] AE pendiente de implementar (bottleneck={bottleneck})")
+
+def run_ae_conv(bottleneck):
+    """Stub para futura implementación de Autoencoder convolucional."""
+    print(f"[Stub] AE_CONV pendiente de implementar (bottleneck={bottleneck})")
 
 def process_gaia_sources():
     df_gaia = pd.read_csv(f"{GAIA_SOURCES_FILENAME}")
