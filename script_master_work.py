@@ -54,22 +54,66 @@ def parse_cli_args():
 
     return algorithm, bottleneck
 
-def run_selected_algorithm(algorithm, bottleneck):
-    # Dispatcher central para enrutar a cada implementación.
-    if algorithm == "UMAP":
-        run_umap(bottleneck)
-    elif algorithm == "PCA":
-        run_pca(bottleneck)
-    elif algorithm == "AE":
-        run_ae(bottleneck)
-    elif algorithm == "AE_CONV":
-        run_ae_conv(bottleneck)
-    else:
-        raise ValueError(f"Algoritmo no soportado: {algorithm}")
+def run_umap(bottleneck, df_merged, wl_bp, wl_rp):
+    import umap
 
-def run_umap(bottleneck):
-    """Stub para futura implementación de UMAP."""
-    print(f"[Stub] UMAP pendiente de implementar (bottleneck={bottleneck})")
+    bp_len = df_merged["BP"].apply(len)
+    rp_len = df_merged["RP"].apply(lambda x: len(x) if isinstance(x, (list, np.ndarray)) else -1)
+
+    bp_target = len(wl_bp)
+    rp_target = len(wl_rp)
+
+    mask = (bp_len == bp_target) & (rp_len == rp_target)
+
+    df_merged_clean = df_merged[mask].reset_index(drop=True)
+
+    print(f"Objetos válidos: {len(df_merged_clean)}")
+    print(f"Objetos descartados: {len(df_merged) - len(df_merged_clean)}")
+    
+    X_bp = np.vstack(df_merged_clean['BP'].values)
+    X_rp = np.vstack(df_merged_clean['RP'].values)
+
+    print("Reducciendo dimensionalidad en azul...")
+    reducer_bp = umap.UMAP(
+        n_neighbors=15,
+        min_dist=0.1,
+        n_components=bottleneck,
+        random_state=None,
+        n_jobs=-1,
+        verbose=True
+    )
+
+    print(type(X_bp))
+    print(X_bp.shape if hasattr(X_bp, "shape") else "sin shape")
+    print(X_bp.dtypes if hasattr(X_bp, "dtypes") else "sin dtypes")
+
+    embedding_bp = reducer_bp.fit_transform(X_bp)
+
+    print("Reducciendo dimensionalidad en rojo...")
+    reducer_rp = umap.UMAP(
+        n_neighbors=15,
+        min_dist=0.1,
+        n_components=bottleneck,
+        random_state=None,
+        n_jobs=-1,
+        verbose=True
+    )
+    embedding_rp = reducer_rp.fit_transform(X_rp)
+
+    print("Guardando embeddings...")
+    umap_columns = {"source_id": df_merged_clean["source_id"].values}
+    for i in range(bottleneck):
+        dim = i + 1
+        umap_columns[f"BP_umap_{dim}"] = embedding_bp[:, i]
+        umap_columns[f"RP_umap_{dim}"] = embedding_rp[:, i]
+
+    df_umap = pd.DataFrame(umap_columns)
+
+    df_umap.to_parquet(f"{OUTPUT_PATH}/{UMAP_LATENT_PARQUET_FILENAME}", index=False)
+    print("Archivo 'spectra_umap_latent.parquet' generado con éxito.")
+
+
+
 
 def run_pca(bottleneck):
     """Stub para futura implementación de PCA."""
@@ -336,7 +380,13 @@ plt.suptitle('Espectros RP (medianas) por rangos de magnitud y color')
 plt.savefig(f"{OUTPUT_PATH}/rp_medians.png", dpi=200, bbox_inches="tight")
 plt.close()
 
-
-print(len(wl_bp))
-print(len(wl_rp))
-run_selected_algorithm(SELECTED_ALGORITHM, BOTTLENECK_DIM)
+if SELECTED_ALGORITHM == "UMAP":
+    run_umap(BOTTLENECK_DIM, df_merged, wl_bp, wl_rp)
+elif SELECTED_ALGORITHM == "PCA":
+    run_pca(BOTTLENECK_DIM)
+elif SELECTED_ALGORITHM == "AE":
+    run_ae(BOTTLENECK_DIM)
+elif SELECTED_ALGORITHM == "AE_CONV":
+    run_ae_conv(BOTTLENECK_DIM)
+else:
+    raise ValueError(f"Algoritmo no soportado: {SELECTED_ALGORITHM}")
