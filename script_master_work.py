@@ -14,7 +14,7 @@ import seaborn as sns
 
 OUTPUT_PATH = "output_test"
 PATH = "spectra_chunks_task1"
-
+SEED = 42
 
 SPECTRA_FILES_REGEX = r'^output_spectra_\d{3}\.csv$'
 SPECTRA_PARQUET_FILENAME = "spectra.parquet"
@@ -134,7 +134,7 @@ def run_umap(bottleneck, df_merged, wl_bp, wl_rp):
         n_neighbors=15,
         min_dist=0.1,
         n_components=bottleneck,
-        random_state=None,
+        random_state=SEED,
         n_jobs=-1,
         verbose=True
     )
@@ -150,7 +150,7 @@ def run_umap(bottleneck, df_merged, wl_bp, wl_rp):
         n_neighbors=15,
         min_dist=0.1,
         n_components=bottleneck,
-        random_state=None,
+        random_state=SEED,
         n_jobs=-1,
         verbose=True
     )
@@ -179,9 +179,179 @@ def run_ae(bottleneck):
     """Stub para futura implementación de Autoencoder denso."""
     print(f"[Stub] AE pendiente de implementar (bottleneck={bottleneck})")
 
-def run_ae_conv(bottleneck):
-    """Stub para futura implementación de Autoencoder convolucional."""
-    print(f"[Stub] AE_CONV pendiente de implementar (bottleneck={bottleneck})")
+def run_ae_conv(bottleneck, df_merged, wl_bp, wl_rp):
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+    from torch.utils.data import DataLoader, TensorDataset
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Usando device:", device)
+
+    bp_target = len(wl_bp)
+    rp_target = len(wl_rp)
+    bp_len = df_merged["BP"].apply(len)
+    rp_len = df_merged["RP"].apply(lambda x: len(x) if isinstance(x, (list, np.ndarray)) else -1)
+    mask = (bp_len == bp_target) & (rp_len == rp_target)
+    df_merged_clean = df_merged[mask].reset_index(drop=True)
+
+    print(f"Objetos válidos: {len(df_merged_clean)}")
+    print(f"Objetos descartados: {len(df_merged) - len(df_merged_clean)}")
+
+    print("Cargando datos...")
+    BP = torch.from_numpy(np.stack(df_merged_clean["BP"].values)).float()
+    RP = torch.from_numpy(np.stack(df_merged_clean["RP"].values)).float()
+
+
+    print("Centrando espectros...")
+    BP = BP - BP.mean(dim=1, keepdim=True)
+    RP = RP - RP.mean(dim=1, keepdim=True)
+
+    batch_size = 256
+
+    train_loader_bp = DataLoader(
+        TensorDataset(BP, BP),
+        batch_size=batch_size,
+        shuffle=True,
+        pin_memory=True
+    )
+
+    train_loader_rp = DataLoader(
+        TensorDataset(RP, RP),
+        batch_size=batch_size,
+        shuffle=True,
+        pin_memory=True
+    )
+
+    class SpectraConvAutoencoder(nn.Module):
+        def __init__(self, input_len, latent_dim=bottleneck):
+            super().__init__()
+
+            self.encoder_cnn = nn.Sequential(
+                nn.Conv1d(1, 16, kernel_size=5, stride=2, padding=2),
+                nn.LeakyReLU(0.1),
+
+                nn.Conv1d(16, 32, kernel_size=5, stride=2, padding=2),
+                nn.LeakyReLU(0.1),
+
+                nn.Conv1d(32, 64, kernel_size=5, stride=2, padding=2),
+                nn.LeakyReLU(0.1)
+            )
+
+            with torch.no_grad():
+                dummy = torch.zeros(1, 1, input_len)
+                encoded = self.encoder_cnn(dummy)
+                self._enc_channels = encoded.shape[1]
+                self._enc_len = encoded.shape[2]
+                flattened = self._enc_channels * self._enc_len
+
+            self.encoder_fc = nn.Linear(flattened, latent_dim)
+
+
+            self.decoder_fc = nn.Linear(latent_dim, flattened)
+
+            self.decoder_cnn = nn.Sequential(
+                nn.ConvTranspose1d(
+                    64, 32, kernel_size=5, stride=2, padding=2, output_padding=1
+                ),
+                nn.LeakyReLU(0.1),
+
+                nn.ConvTranspose1d(
+                    32, 16, kernel_size=5, stride=2, padding=2, output_padding=1
+                ),
+                nn.LeakyReLU(0.1),
+
+                nn.ConvTranspose1d(
+                    16, 1, kernel_size=5, stride=2, padding=2, output_padding=1
+                )
+            )
+
+        def encode(self, x):
+            h = self.encoder_cnn(x)
+            h = h.view(h.size(0), -1)
+            z = self.encoder_fc(h)
+            return z
+
+        def decode(self, z):
+            h = self.decoder_fc(z)
+            h = h.view(z.size(0), self._enc_channels, self._enc_len)
+            x_rec = self.decoder_cnn(h)
+            return x_rec
+
+        def forward(self, x):
+            z = self.encode(x)
+            x_rec = self.decode(z)
+            x_rec = x_rec[..., :x.shape[-1]]
+            return x_rec, z
+
+    def train_autoencoder(model, loader, n_epochs=100, lr=1e-3):
+        model.train()
+        optimizer = optim.Adam(model.parameters(), lr=lr)
+        criterion = nn.MSELoss()
+
+        for epoch in range(n_epochs):
+            total_loss = 0.0
+
+            for x, _ in loader:
+                x = x.to(device, non_blocking=True)
+                x = x.unsqueeze(1)  # (batch, 1, 100)
+
+                optimizer.zero_grad()
+                x_rec, _ = model(x)
+                loss = criterion(x_rec, x)
+                loss.backward()
+                optimizer.step()
+
+                total_loss += loss.item()
+
+            if (epoch + 1) % 10 == 0:
+                print(
+                    f"Epoch {epoch+1}/{n_epochs} "
+                    f"Loss: {total_loss / len(loader):.3e}"
+                )
+
+    print("Creando modelos...")
+    ae_bp = SpectraConvAutoencoder(bp_target, bottleneck).to(device)
+    ae_rp = SpectraConvAutoencoder(rp_target, bottleneck).to(device)
+
+    print("Entrenando autoencoder BP...")
+    train_autoencoder(ae_bp, train_loader_bp, n_epochs=100)
+
+    print("Entrenando autoencoder RP...")
+    train_autoencoder(ae_rp, train_loader_rp, n_epochs=100)
+
+    print("Calculando representaciones latentes y errores...")
+    ae_bp.eval()
+    ae_rp.eval()
+
+    print("Guardando modelos...")
+    torch.save(ae_bp.state_dict(), f"{OUTPUT_PATH}/ae_bp_conv_{bottleneck}d_latent.pth")
+    torch.save(ae_rp.state_dict(), f"{OUTPUT_PATH}/ae_rp_conv_{bottleneck}d_latent.pth")
+
+    with torch.no_grad():
+        BP_gpu = BP.to(device)
+        x_rec_bp, BP_latent = ae_bp(BP_gpu.unsqueeze(1))
+        x_rec_bp = x_rec_bp.squeeze(1)
+        RP_gpu = RP.to(device)
+        x_rec_rp, RP_latent = ae_rp(RP_gpu.unsqueeze(1))
+        x_rec_rp = x_rec_rp.squeeze(1)
+
+    BP_latent = BP_latent.cpu()
+    RP_latent = RP_latent.cpu()
+
+    print("Guardando representaciones latentes...")
+
+    df_autoenc = pd.DataFrame()
+    for i in range(bottleneck):
+        df_autoenc[f"BP_latent_{i+1}"] = BP_latent[:, i].numpy()
+        df_autoenc[f"RP_latent_{i+1}"] = RP_latent[:, i].numpy()
+    df_autoenc["source_id"] = df_merged_clean["source_id"].values
+    df_autoenc["MG"] = df_merged_clean["MG"].values
+    df_autoenc["BP_RP"] = df_merged_clean["BP_RP"].values
+
+    df_autoenc.to_parquet(f"{OUTPUT_PATH}/ae_conv_{bottleneck}d_latent.parquet", index=False)
+    print(f"Archivo 'ae_conv_{bottleneck}d_latent.parquet' generado con éxito.")
+    save_pairplots(df_autoenc, "AE_CONV", bottleneck)
 
 def process_gaia_sources():
     df_gaia = pd.read_csv(f"{GAIA_SOURCES_FILENAME}")
@@ -443,6 +613,6 @@ elif SELECTED_ALGORITHM == "PCA":
 elif SELECTED_ALGORITHM == "AE":
     run_ae(BOTTLENECK_DIM)
 elif SELECTED_ALGORITHM == "AE_CONV":
-    run_ae_conv(BOTTLENECK_DIM)
+    run_ae_conv(BOTTLENECK_DIM, df_merged, wl_bp, wl_rp)
 else:
     raise ValueError(f"Algoritmo no soportado: {SELECTED_ALGORITHM}")
