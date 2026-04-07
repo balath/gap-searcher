@@ -2,11 +2,11 @@
 set -euo pipefail
 
 # Configuracion principal
-SCRIPT_PATH="/mnt/c/Users/yeyos/script_master_work.py"
+SCRIPT_PATH="spelarebus.py"
 BASE_DIR="$(dirname "$SCRIPT_PATH")"
-OUTPUT_DIR="$BASE_DIR/output_test"
-SPECTRA_DIR="$BASE_DIR/spectra_chunks_task1"
-SOURCES_CSV="$BASE_DIR/sources_gaia_task1.csv"
+OUTPUT_DIR="$BASE_DIR/output_files"
+SPECTRA_DIR="$BASE_DIR/spectra_chunks"
+SOURCES_CSV="$BASE_DIR/sources_gaia.csv"
 
 echo "==> Directorio base: $BASE_DIR"
 
@@ -29,14 +29,14 @@ echo "Directorio listo: $OUTPUT_DIR"
 # 3) Comprobar que los CSV estan en su sitio
 echo "==> Validando archivos CSV de entrada..."
 
+validation_errors=()
+
 if [[ ! -f "$SOURCES_CSV" ]]; then
-  echo "ERROR: Falta $SOURCES_CSV"
-  exit 1
+  validation_errors+=("Falta $SOURCES_CSV")
 fi
 
 if [[ ! -d "$SPECTRA_DIR" ]]; then
-  echo "ERROR: Falta el directorio $SPECTRA_DIR"
-  exit 1
+  validation_errors+=("Falta el directorio $SPECTRA_DIR")
 fi
 
 shopt -s nullglob
@@ -44,14 +44,22 @@ spectra_files=("$SPECTRA_DIR"/output_spectra_[0-9][0-9][0-9].csv)
 shopt -u nullglob
 
 if (( ${#spectra_files[@]} == 0 )); then
-  echo "ERROR: No hay CSV validos en $SPECTRA_DIR con patron output_spectra_###.csv"
+  validation_errors+=("No hay CSV validos en $SPECTRA_DIR con patron output_spectra_###.csv")
+fi
+
+if (( ${#validation_errors[@]} > 0 )); then
+  echo
+  echo "Se detectaron errores de validacion:"
+  for err in "${validation_errors[@]}"; do
+    echo "  - ERROR: $err"
+  done
   exit 1
 fi
 
 echo "OK: Encontrados ${#spectra_files[@]} archivos de espectros."
-echo "OK: sources_gaia_task1.csv encontrado."
+echo "OK: sources_gaia.csv encontrado."
 echo "Todo listo."
 echo
 echo "Ejemplo de ejecucion:"
 echo "  cd \"$BASE_DIR\""
-echo "  python3 script_master_work.py UMAP 3"
+echo "  python3 spelarebus.py UMAP 3"

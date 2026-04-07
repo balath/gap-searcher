@@ -12,25 +12,25 @@ import matplotlib.cm as cm
 import matplotlib.colors as colors
 import seaborn as sns
 
-OUTPUT_PATH = "output_test"
-PATH = "spectra_chunks_task1"
+OUTPUT_PATH = "output_files"
+SPECTRA_PATH = "spectra_chunks"
 SEED = 42
 
 SPECTRA_FILES_REGEX = r'^output_spectra_\d{3}\.csv$'
 SPECTRA_PARQUET_FILENAME = "spectra.parquet"
-GAIA_SOURCES_FILENAME = "sources_gaia_task1.csv"
+GAIA_SOURCES_FILENAME = "sources_gaia.csv"
 GAIA_SOURCES_PARQUET_FILENAME = "sources.parquet"
 MERGED_DATA_PARQUET_FILENAME = "merged_data.parquet"
 
 SPECTRA_SAMPLING = np.linspace(0., 60., 100)
 VALID_ALGORITHMS = {"UMAP", "PCA", "AE", "AE_CONV"}
-VALID_BOTTLENECKS = {3, 5, 10}
+VALID_LATENT_DIMS = {3, 5, 10}
 
 def parse_cli_args():
     if len(sys.argv) != 3:
         raise ValueError(
-            "Uso: python script_master_work.py <ALGORITMO> <BOTTLENECK>. "
-            "ALGORITMO: UMAP|PCA|AE|AE_CONV. BOTTLENECK: 3|5|10."
+            "Uso: python spelarebus.py <ALGORITMO> <LATENT_DIM>. "
+            "ALGORITMO: UMAP|PCA|AE|AE_CONV. LATENT_DIM: 3|5|10."
         )
 
     algorithm = sys.argv[1].upper()
@@ -41,20 +41,20 @@ def parse_cli_args():
         )
 
     try:
-        bottleneck = int(sys.argv[2])
+        latent_dim = int(sys.argv[2])
     except ValueError as exc:
         raise ValueError(
-            f"Bottleneck inválido: {sys.argv[2]}. Debe ser un entero (3, 5 o 10)."
+            f"Latent_dim inválido: {sys.argv[2]}. Debe ser un entero (3, 5 o 10)."
         ) from exc
 
-    if bottleneck not in VALID_BOTTLENECKS:
+    if latent_dim not in VALID_LATENT_DIMS:
         raise ValueError(
-            f"Bottleneck inválido: {bottleneck}. Valores permitidos: 3, 5, 10."
+            f"Latent_dim inválido: {latent_dim}. Valores permitidos: 3, 5, 10."
         )
 
-    return algorithm, bottleneck
+    return algorithm, latent_dim
 
-def save_pairplots(df, algorithm, bottleneck):
+def save_pairplots(df, algorithm, latent_dim):
     print("Creando pairplots...")
     bp_cols = [col for col in df.columns if col.startswith('BP_') and col != 'BP_RP']
     rp_cols = [col for col in df.columns if col.startswith('RP_')]
@@ -87,7 +87,7 @@ def save_pairplots(df, algorithm, bottleneck):
             y_margin = 0.1 * (ymax - ymin)
             ax.set_xlim(xmin - x_margin, xmax + x_margin)
             ax.set_ylim(ymin - y_margin, ymax + y_margin)
-    plt.savefig(f"{OUTPUT_PATH}/bp_{algorithm}_{bottleneck}d_pairplot.png", dpi=200, bbox_inches="tight")
+    plt.savefig(f"{OUTPUT_PATH}/bp_{algorithm}_{latent_dim}d_pairplot.png", dpi=200, bbox_inches="tight")
     plt.close()
 
     print("Creando plot de componentes pareados para el rojo...")
@@ -107,10 +107,10 @@ def save_pairplots(df, algorithm, bottleneck):
             ax.set_xlim(xmin - x_margin, xmax + x_margin)
             ax.set_ylim(ymin - y_margin, ymax + y_margin)
     g_rp.fig.suptitle(f'RP {algorithm} Pairplot', y=1.02, fontsize=16)
-    plt.savefig(f"{OUTPUT_PATH}/rp_{algorithm}_{bottleneck}d_pairplot.png", dpi=200, bbox_inches="tight")
+    plt.savefig(f"{OUTPUT_PATH}/rp_{algorithm}_{latent_dim}d_pairplot.png", dpi=200, bbox_inches="tight")
     plt.close()
 
-def run_umap(bottleneck, df_merged, wl_bp, wl_rp):
+def run_umap(latent_dim, df_merged, wl_bp, wl_rp):
     import umap
 
     bp_len = df_merged["BP"].apply(len)
@@ -133,7 +133,7 @@ def run_umap(bottleneck, df_merged, wl_bp, wl_rp):
     reducer_bp = umap.UMAP(
         n_neighbors=15,
         min_dist=0.1,
-        n_components=bottleneck,
+        n_components=latent_dim,
         random_state=SEED,
         n_jobs=-1,
         verbose=True
@@ -149,7 +149,7 @@ def run_umap(bottleneck, df_merged, wl_bp, wl_rp):
     reducer_rp = umap.UMAP(
         n_neighbors=15,
         min_dist=0.1,
-        n_components=bottleneck,
+        n_components=latent_dim,
         random_state=SEED,
         n_jobs=-1,
         verbose=True
@@ -158,7 +158,7 @@ def run_umap(bottleneck, df_merged, wl_bp, wl_rp):
 
     print("Guardando embeddings...")
     umap_columns = {"source_id": df_merged_clean["source_id"].values}
-    for i in range(bottleneck):
+    for i in range(latent_dim):
         dim = i + 1
         umap_columns[f"BP_umap_{dim}"] = embedding_bp[:, i]
         umap_columns[f"RP_umap_{dim}"] = embedding_rp[:, i]
@@ -167,19 +167,19 @@ def run_umap(bottleneck, df_merged, wl_bp, wl_rp):
     df_umap["MG"] = df_merged_clean["MG"].values
     df_umap["BP_RP"] = df_merged_clean["BP_RP"].values
 
-    df_umap.to_parquet(f"{OUTPUT_PATH}/umap_{bottleneck}d_latent.parquet", index=False)
-    print(f"Archivo 'umap_{bottleneck}d_latent.parquet' generado con éxito.")
-    save_pairplots(df_umap, "UMAP", bottleneck)
+    df_umap.to_parquet(f"{OUTPUT_PATH}/umap_{latent_dim}d_latent.parquet", index=False)
+    print(f"Archivo 'umap_{latent_dim}d_latent.parquet' generado con éxito.")
+    save_pairplots(df_umap, "UMAP", latent_dim)
 
-def run_pca(bottleneck):
+def run_pca(latent_dim):
     """Stub para futura implementación de PCA."""
-    print(f"[Stub] PCA pendiente de implementar (bottleneck={bottleneck})")
+    print(f"[Stub] PCA pendiente de implementar (latent_dim={latent_dim})")
 
-def run_ae(bottleneck):
+def run_ae(latent_dim):
     """Stub para futura implementación de Autoencoder denso."""
-    print(f"[Stub] AE pendiente de implementar (bottleneck={bottleneck})")
+    print(f"[Stub] AE pendiente de implementar (latent_dim={latent_dim})")
 
-def run_ae_conv(bottleneck, df_merged, wl_bp, wl_rp):
+def run_ae_conv(latent_dim, df_merged, wl_bp, wl_rp):
     import torch
     import torch.nn as nn
     import torch.optim as optim
@@ -224,7 +224,7 @@ def run_ae_conv(bottleneck, df_merged, wl_bp, wl_rp):
     )
 
     class SpectraConvAutoencoder(nn.Module):
-        def __init__(self, input_len, latent_dim=bottleneck):
+        def __init__(self, input_len, latent_dim=latent_dim):
             super().__init__()
 
             self.encoder_cnn = nn.Sequential(
@@ -311,8 +311,8 @@ def run_ae_conv(bottleneck, df_merged, wl_bp, wl_rp):
                 )
 
     print("Creando modelos...")
-    ae_bp = SpectraConvAutoencoder(bp_target, bottleneck).to(device)
-    ae_rp = SpectraConvAutoencoder(rp_target, bottleneck).to(device)
+    ae_bp = SpectraConvAutoencoder(bp_target, latent_dim).to(device)
+    ae_rp = SpectraConvAutoencoder(rp_target, latent_dim).to(device)
 
     print("Entrenando autoencoder BP...")
     train_autoencoder(ae_bp, train_loader_bp, n_epochs=100)
@@ -325,8 +325,8 @@ def run_ae_conv(bottleneck, df_merged, wl_bp, wl_rp):
     ae_rp.eval()
 
     print("Guardando modelos...")
-    torch.save(ae_bp.state_dict(), f"{OUTPUT_PATH}/ae_bp_conv_{bottleneck}d_latent.pth")
-    torch.save(ae_rp.state_dict(), f"{OUTPUT_PATH}/ae_rp_conv_{bottleneck}d_latent.pth")
+    torch.save(ae_bp.state_dict(), f"{OUTPUT_PATH}/ae_bp_conv_{latent_dim}d_latent.pth")
+    torch.save(ae_rp.state_dict(), f"{OUTPUT_PATH}/ae_rp_conv_{latent_dim}d_latent.pth")
 
     with torch.no_grad():
         BP_gpu = BP.to(device)
@@ -342,16 +342,16 @@ def run_ae_conv(bottleneck, df_merged, wl_bp, wl_rp):
     print("Guardando representaciones latentes...")
 
     df_autoenc = pd.DataFrame()
-    for i in range(bottleneck):
+    for i in range(latent_dim):
         df_autoenc[f"BP_latent_{i+1}"] = BP_latent[:, i].numpy()
         df_autoenc[f"RP_latent_{i+1}"] = RP_latent[:, i].numpy()
     df_autoenc["source_id"] = df_merged_clean["source_id"].values
     df_autoenc["MG"] = df_merged_clean["MG"].values
     df_autoenc["BP_RP"] = df_merged_clean["BP_RP"].values
 
-    df_autoenc.to_parquet(f"{OUTPUT_PATH}/ae_conv_{bottleneck}d_latent.parquet", index=False)
-    print(f"Archivo 'ae_conv_{bottleneck}d_latent.parquet' generado con éxito.")
-    save_pairplots(df_autoenc, "AE_CONV", bottleneck)
+    df_autoenc.to_parquet(f"{OUTPUT_PATH}/ae_conv_{latent_dim}d_latent.parquet", index=False)
+    print(f"Archivo 'ae_conv_{latent_dim}d_latent.parquet' generado con éxito.")
+    save_pairplots(df_autoenc, "AE_CONV", latent_dim)
 
 def process_gaia_sources():
     df_gaia = pd.read_csv(f"{GAIA_SOURCES_FILENAME}")
@@ -361,9 +361,9 @@ def process_gaia_sources():
 def process_spectra_files():
     files = []
     pattern = re.compile(SPECTRA_FILES_REGEX)
-    for filename in os.listdir(PATH):
+    for filename in os.listdir(SPECTRA_PATH):
         if pattern.match(filename):
-            files.append(f"{PATH}/{filename}")
+            files.append(f"{SPECTRA_PATH}/{filename}")
 
     files.sort()
     print(f"Encontrados {len(files)} archivos para procesar")
@@ -426,9 +426,9 @@ def reduce_spectra_by_wavelength(df_spectra):
 #              Main                #
 ####################################
 
-SELECTED_ALGORITHM, BOTTLENECK_DIM = parse_cli_args()
+SELECTED_ALGORITHM, LATENT_DIM = parse_cli_args()
 print(f"Algoritmo seleccionado: {SELECTED_ALGORITHM}")
-print(f"Dimensión bottleneck: {BOTTLENECK_DIM}")
+print(f"Dimensión latent_dim: {LATENT_DIM}")
 
 #Check if exist spectra parquet, if not, process the spectra files
 df_spectra = pd.DataFrame()
@@ -607,12 +607,12 @@ plt.savefig(f"{OUTPUT_PATH}/rp_medians.png", dpi=200, bbox_inches="tight")
 plt.close()
 
 if SELECTED_ALGORITHM == "UMAP":
-    run_umap(BOTTLENECK_DIM, df_merged, wl_bp, wl_rp)
+    run_umap(LATENT_DIM, df_merged, wl_bp, wl_rp)
 elif SELECTED_ALGORITHM == "PCA":
-    run_pca(BOTTLENECK_DIM)
+    run_pca(LATENT_DIM)
 elif SELECTED_ALGORITHM == "AE":
-    run_ae(BOTTLENECK_DIM)
+    run_ae(LATENT_DIM)
 elif SELECTED_ALGORITHM == "AE_CONV":
-    run_ae_conv(BOTTLENECK_DIM, df_merged, wl_bp, wl_rp)
+    run_ae_conv(LATENT_DIM, df_merged, wl_bp, wl_rp)
 else:
     raise ValueError(f"Algoritmo no soportado: {SELECTED_ALGORITHM}")

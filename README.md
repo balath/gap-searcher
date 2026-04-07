@@ -49,13 +49,13 @@ Desde bash:
 El script principal requiere dos argumentos:
 
 ```bash
-python3 spelarebus.py <ALGORITMO> <BOTTLENECK>
+python3 spelarebus.py <ALGORITMO> <LATENT_DIM>
 ```
 
 Valores permitidos:
 
 - `ALGORITMO`: `UMAP`, `PCA`, `AE`, `AE_CONV`
-- `BOTTLENECK`: `3`, `5`, `10`
+- `LATENT_DIM`: `3`, `5`, `10`
 
 Ejemplo:
 
