@@ -10,7 +10,7 @@ from gaiaxpy import pwl_to_wl
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as colors
-
+import seaborn as sns
 
 OUTPUT_PATH = "output_test"
 PATH = "spectra_chunks_task1"
@@ -53,6 +53,62 @@ def parse_cli_args():
         )
 
     return algorithm, bottleneck
+
+def save_pairplots(df, algorithm, bottleneck):
+    print("Creando pairplots...")
+    bp_cols = [col for col in df.columns if col.startswith('BP_') and col != 'BP_RP']
+    rp_cols = [col for col in df.columns if col.startswith('RP_')]
+
+    def filter_outliers(df, cols, lower_q=0.0001, upper_q=0.9999):
+        df_filtered = df.copy()
+        for col in cols:
+            low, high = df[col].quantile(lower_q), df[col].quantile(upper_q)
+            df_filtered = df_filtered[df_filtered[col].between(low, high)]
+        return df_filtered
+
+    print("Filtrando outliers...")
+    df_bp_filtered = filter_outliers(df, bp_cols)
+    df_rp_filtered = filter_outliers(df, rp_cols)
+
+    print("Creando plot de componentes pareados para el azul...")
+    g_bp = sns.pairplot(
+        df_bp_filtered,
+        vars=bp_cols,
+        diag_kind="kde",
+        plot_kws={'s': 3, 'alpha': 0.15, 'color': 'blue'},
+        corner=True
+    )
+    g_bp.fig.suptitle(f'BP {algorithm} Pairplot', y=1.02, fontsize=16)
+    for ax in g_bp.axes.flatten():
+        if ax is not None:
+            xmin, xmax = ax.get_xlim()
+            ymin, ymax = ax.get_ylim()
+            x_margin = 0.1 * (xmax - xmin)
+            y_margin = 0.1 * (ymax - ymin)
+            ax.set_xlim(xmin - x_margin, xmax + x_margin)
+            ax.set_ylim(ymin - y_margin, ymax + y_margin)
+    plt.savefig(f"{OUTPUT_PATH}/bp_{algorithm}_{bottleneck}d_pairplot.png", dpi=200, bbox_inches="tight")
+    plt.close()
+
+    print("Creando plot de componentes pareados para el rojo...")
+    g_rp = sns.pairplot(
+        df_rp_filtered,
+        vars=rp_cols,
+        diag_kind="kde",
+        plot_kws={'s': 3, 'alpha': 0.15, 'color': 'red'},
+        corner=True
+    )
+    for ax in g_rp.axes.flatten():
+        if ax is not None:
+            xmin, xmax = ax.get_xlim()
+            ymin, ymax = ax.get_ylim()
+            x_margin = 0.1 * (xmax - xmin)
+            y_margin = 0.1 * (ymax - ymin)
+            ax.set_xlim(xmin - x_margin, xmax + x_margin)
+            ax.set_ylim(ymin - y_margin, ymax + y_margin)
+    g_rp.fig.suptitle(f'RP {algorithm} Pairplot', y=1.02, fontsize=16)
+    plt.savefig(f"{OUTPUT_PATH}/rp_{algorithm}_{bottleneck}d_pairplot.png", dpi=200, bbox_inches="tight")
+    plt.close()
 
 def run_umap(bottleneck, df_merged, wl_bp, wl_rp):
     import umap
@@ -108,12 +164,12 @@ def run_umap(bottleneck, df_merged, wl_bp, wl_rp):
         umap_columns[f"RP_umap_{dim}"] = embedding_rp[:, i]
 
     df_umap = pd.DataFrame(umap_columns)
+    df_umap["MG"] = df_merged_clean["MG"].values
+    df_umap["BP_RP"] = df_merged_clean["BP_RP"].values
 
-    df_umap.to_parquet(f"{OUTPUT_PATH}/{UMAP_LATENT_PARQUET_FILENAME}", index=False)
-    print("Archivo 'spectra_umap_latent.parquet' generado con éxito.")
-
-
-
+    df_umap.to_parquet(f"{OUTPUT_PATH}/umap_{bottleneck}d_latent.parquet", index=False)
+    print(f"Archivo 'umap_{bottleneck}d_latent.parquet' generado con éxito.")
+    save_pairplots(df_umap, "UMAP", bottleneck)
 
 def run_pca(bottleneck):
     """Stub para futura implementación de PCA."""
