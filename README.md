@@ -1,4 +1,4 @@
-SPEctra LAtent REpresentations BUilder Script (SPELAREBUS)
+# SPEctra LAtent REpresentations BUilder Script (SPELAREBUS)
 
 Preparación del entorno para ejecutar `spelarebus.py`, validar los ficheros de entrada y lanzar el procesamiento.
 
