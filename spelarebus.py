@@ -185,6 +185,10 @@ def run_ae_conv(latent_dim, df_merged, wl_bp, wl_rp):
     import torch.optim as optim
     from torch.utils.data import DataLoader, TensorDataset
 
+    torch.manual_seed(SEED)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(SEED)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Usando device:", device)
 
@@ -208,11 +212,14 @@ def run_ae_conv(latent_dim, df_merged, wl_bp, wl_rp):
     RP = RP - RP.mean(dim=1, keepdim=True)
 
     batch_size = 256
+    loader_generator_bp = torch.Generator().manual_seed(SEED)
+    loader_generator_rp = torch.Generator().manual_seed(SEED)
 
     train_loader_bp = DataLoader(
         TensorDataset(BP, BP),
         batch_size=batch_size,
         shuffle=True,
+        generator=loader_generator_bp,
         pin_memory=True
     )
 
@@ -220,6 +227,7 @@ def run_ae_conv(latent_dim, df_merged, wl_bp, wl_rp):
         TensorDataset(RP, RP),
         batch_size=batch_size,
         shuffle=True,
+        generator=loader_generator_rp,
         pin_memory=True
     )
 
