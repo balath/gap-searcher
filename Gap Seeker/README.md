@@ -1,6 +1,6 @@
-# Visualización astrofísica – dimensiones latentes y diagrama color-magnitud
+# Gap Seeker
 
-Aplicación Bokeh para explorar datos astrofísicos en parquet: pairplot de dimensiones latentes con selección por lazo y diagrama color-magnitud absoluta (BP_RP vs MG) actualizable.
+Aplicación Bokeh para explorar datos astrofísicos en parquet: pairplot de dimensiones latentes con selección por lazo y diagrama CAMD (color-magnitud absoluta) actualizable.
 
 ## Requisitos del parquet
 
@@ -10,7 +10,6 @@ Aplicación Bokeh para explorar datos astrofísicos en parquet: pairplot de dime
 ## Instalación
 
 ```bash
-cd astro_app
 pip install -r requirements.txt
 ```
 

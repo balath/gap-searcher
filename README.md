@@ -36,6 +36,39 @@ En el directorio raíz donde se ejecute spelarebus deben existir:
   - `output_spectra_001.csv`
   - `...`
 
+## 4.1) Esquema mínimo de columnas requerido
+
+Para que `spelarebus.py` funcione, los ficheros de entrada deben incluir al menos las siguientes columnas.
+
+### `sources_gaia.csv`
+
+Columnas obligatorias:
+
+- `source_id`
+- `phot_bp_mean_mag`
+- `phot_rp_mean_mag`
+- `phot_g_mean_mag`
+- `r_med_geo`
+
+Notas:
+
+- `source_id` se usa para combinar con los espectros.
+- Las columnas fotométricas y `r_med_geo` se usan para calcular `BP_RP` y `MG`.
+
+### `spectra_chunks/output_spectra_###.csv`
+
+Columnas obligatorias:
+
+- `source_id`
+- `xp`
+- `flux`
+
+Formato esperado:
+
+- Cada `source_id` debe aparecer en dos filas consecutivas, una para `BP` y otra para `RP`.
+- `xp` debe contener el valor `BP` o `RP`.
+- `flux` debe ser una lista serializada (texto) con valores numéricos, por ejemplo: `"[0.12, 0.15, 0.11, ...]"`.
+
 ## 5) Como ejecutar la preparacion
 
 Desde bash:
