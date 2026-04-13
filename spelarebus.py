@@ -98,7 +98,7 @@ def save_pairplots(df, algorithm, latent_dim):
             ax.set_xlim(xmin - x_margin, xmax + x_margin)
             ax.set_ylim(ymin - y_margin, ymax + y_margin)
     g_bp.figure.savefig(f"{OUTPUT_PATH}/bp_{algorithm}_{latent_dim}d_pairplot.png", dpi=SAVE_DPI, bbox_inches="tight")
-    g_bp.figure.close()
+    plt.close(g_bp.figure)
 
     print("Creando plot de componentes pareados para el rojo...")
     g_rp = sns.pairplot(
@@ -121,7 +121,7 @@ def save_pairplots(df, algorithm, latent_dim):
             ax.set_xlim(xmin - x_margin, xmax + x_margin)
             ax.set_ylim(ymin - y_margin, ymax + y_margin)
     g_rp.figure.savefig(f"{OUTPUT_PATH}/rp_{algorithm}_{latent_dim}d_pairplot.png", dpi=SAVE_DPI, bbox_inches="tight")
-    g_rp.figure.close()
+    plt.close(g_rp.figure)
 
 def run_umap(latent_dim, df_merged, wl_bp, wl_rp):
     import umap
@@ -184,12 +184,22 @@ def run_umap(latent_dim, df_merged, wl_bp, wl_rp):
     print(f"Archivo 'umap_{latent_dim}d_latent.parquet' generado con éxito.")
     save_pairplots(df_umap, "UMAP", latent_dim)
 
-def run_pca(latent_dim, df_merged):
+def run_pca(latent_dim, df_merged, wl_bp, wl_rp):
     import torch
 
+    bp_target = len(wl_bp)
+    rp_target = len(wl_rp)
+    bp_len = df_merged["BP"].apply(len)
+    rp_len = df_merged["RP"].apply(lambda x: len(x) if isinstance(x, (list, np.ndarray)) else -1)
+    mask = (bp_len == bp_target) & (rp_len == rp_target)
+    df_merged_clean = df_merged[mask].reset_index(drop=True)
+
+    print(f"Objetos válidos: {len(df_merged_clean)}")
+    print(f"Objetos descartados: {len(df_merged) - len(df_merged_clean)}")
+
     print("Convirtiendo a tensores...")
-    BP = torch.tensor(df_merged["BP"].values, dtype=torch.float32)
-    RP = torch.tensor(df_merged["RP"].values, dtype=torch.float32)
+    BP = torch.from_numpy(np.stack(df_merged_clean["BP"].values)).float()
+    RP = torch.from_numpy(np.stack(df_merged_clean["RP"].values)).float()
 
     print("Centrando los datos...")
     BP_centered = BP - BP.mean(dim=0)
@@ -206,9 +216,11 @@ def run_pca(latent_dim, df_merged):
 
     print("Convirtiendo a pandas...")
     df_pca = pd.DataFrame({
-        "source_id": df_merged["source_id"].values,
+        "source_id": df_merged_clean["source_id"].values,
         **{f"BP_pca_{i+1}": BP_reduced[:, i].numpy() for i in range(k)},
-        **{f"RP_pca_{i+1}": RP_reduced[:, i].numpy() for i in range(k)}
+        **{f"RP_pca_{i+1}": RP_reduced[:, i].numpy() for i in range(k)},
+        "MG": df_merged_clean["MG"].values,
+        "BP_RP": df_merged_clean["BP_RP"].values,
     })
 
     df_pca.to_parquet(f"{OUTPUT_PATH}/pca_{latent_dim}d_latent.parquet", index=False)
@@ -247,9 +259,6 @@ def run_ae(latent_dim, df_merged, wl_bp, wl_rp):
     print("Centrando datos...")
     BP = BP - BP.mean(dim=1, keepdim=True)
     RP = RP - RP.mean(dim=1, keepdim=True)
-
-    BP = BP.to(device)
-    RP = RP.to(device)
 
     batch_size = 256
     loader_generator_bp = torch.Generator().manual_seed(SEED)
@@ -382,25 +391,18 @@ def run_ae(latent_dim, df_merged, wl_bp, wl_rp):
     print("Entrenando VAE RP...")
     train_vae(vae_rp, train_loader_rp, n_epochs=100)
 
-    print("Obteniendo representaciones latentes (media del codificador) y error de reconstrucción...")
+    print("Obteniendo representaciones latentes (media del codificador)...")
     vae_bp.eval()
     vae_rp.eval()
 
     with torch.no_grad():
-        mu_bp, _ = vae_bp.encode(BP)
-        x_rec_bp = vae_bp.decode(mu_bp)
+        mu_bp, _ = vae_bp.encode(BP.to(device))
         BP_latent = mu_bp
-        BP_errors = torch.norm(BP - x_rec_bp, dim=1)
-
-        mu_rp, _ = vae_rp.encode(RP)
-        x_rec_rp = vae_rp.decode(mu_rp)
+        mu_rp, _ = vae_rp.encode(RP.to(device))
         RP_latent = mu_rp
-        RP_errors = torch.norm(RP - x_rec_rp, dim=1)
 
     BP_latent = BP_latent.cpu()
     RP_latent = RP_latent.cpu()
-    BP_errors = BP_errors.cpu()
-    RP_errors = RP_errors.cpu()
 
     print("Guardando modelos...")
     torch.save(vae_bp.state_dict(), f"{OUTPUT_PATH}/ae_{latent_dim}d_bp.pth")
@@ -412,8 +414,6 @@ def run_ae(latent_dim, df_merged, wl_bp, wl_rp):
         "source_id": df_merged_clean["source_id"].values,
         **{f"BP_latent_{i+1}": BP_latent[:, i].numpy() for i in range(latent_dim)},
         **{f"RP_latent_{i+1}": RP_latent[:, i].numpy() for i in range(latent_dim)},
-        "BP_error_rec": BP_errors.numpy(),
-        "RP_error_rec": RP_errors.numpy(),
         "MG": df_merged_clean["MG"].values,
         "BP_RP": df_merged_clean["BP_RP"].values,
     })
@@ -866,7 +866,7 @@ plt.close()
 if SELECTED_ALGORITHM == "UMAP":
     run_umap(LATENT_DIM, df_merged, wl_bp, wl_rp)
 elif SELECTED_ALGORITHM == "PCA":
-    run_pca(LATENT_DIM)
+    run_pca(LATENT_DIM, df_merged, wl_bp, wl_rp)
 elif SELECTED_ALGORITHM == "AE":
     run_ae(LATENT_DIM, df_merged, wl_bp, wl_rp)
 elif SELECTED_ALGORITHM == "AE_CONV":
