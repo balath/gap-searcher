@@ -55,6 +55,13 @@ def parse_cli_args():
     return algorithm, latent_dim
 
 def save_pairplots(df, algorithm, latent_dim):
+    PAIRPLOT_HEIGHT = 5.0
+    PAIRPLOT_ASPECT = 1.0
+    SAVE_DPI = 400
+    s = 1
+    alpha = 0.55
+    KDE_LINEWIDTH = 2.0
+
     print("Creando pairplots...")
     bp_cols = [col for col in df.columns if col.startswith('BP_') and col != 'BP_RP']
     rp_cols = [col for col in df.columns if col.startswith('RP_')]
@@ -75,10 +82,13 @@ def save_pairplots(df, algorithm, latent_dim):
         df_bp_filtered,
         vars=bp_cols,
         diag_kind="kde",
-        plot_kws={'s': 3, 'alpha': 0.15, 'color': 'blue'},
-        corner=True
+        plot_kws={'s': s, 'alpha': alpha, 'color': 'blue', 'linewidth': 0, 'edgecolors': 'none'},
+        diag_kws={'linewidth': KDE_LINEWIDTH},
+        corner=True,
+        height=PAIRPLOT_HEIGHT,
+        aspect=PAIRPLOT_ASPECT,
     )
-    g_bp.fig.suptitle(f'BP {algorithm} Pairplot', y=1.02, fontsize=16)
+    g_bp.figure.suptitle(f'BP {algorithm} Pairplot', y=1.02, fontsize=16)
     for ax in g_bp.axes.flatten():
         if ax is not None:
             xmin, xmax = ax.get_xlim()
@@ -87,17 +97,21 @@ def save_pairplots(df, algorithm, latent_dim):
             y_margin = 0.1 * (ymax - ymin)
             ax.set_xlim(xmin - x_margin, xmax + x_margin)
             ax.set_ylim(ymin - y_margin, ymax + y_margin)
-    plt.savefig(f"{OUTPUT_PATH}/bp_{algorithm}_{latent_dim}d_pairplot.png", dpi=200, bbox_inches="tight")
-    plt.close()
+    g_bp.figure.savefig(f"{OUTPUT_PATH}/bp_{algorithm}_{latent_dim}d_pairplot.png", dpi=SAVE_DPI, bbox_inches="tight")
+    g_bp.figure.close()
 
     print("Creando plot de componentes pareados para el rojo...")
     g_rp = sns.pairplot(
         df_rp_filtered,
         vars=rp_cols,
         diag_kind="kde",
-        plot_kws={'s': 3, 'alpha': 0.15, 'color': 'red'},
-        corner=True
+        plot_kws={'s': s, 'alpha': alpha, 'color': 'red', 'linewidth': 0, 'edgecolors': 'none'},
+        diag_kws={'linewidth': KDE_LINEWIDTH},
+        corner=True,
+        height=PAIRPLOT_HEIGHT,
+        aspect=PAIRPLOT_ASPECT
     )
+    g_rp.figure.suptitle(f'RP {algorithm} Pairplot', y=1.02, fontsize=20)
     for ax in g_rp.axes.flatten():
         if ax is not None:
             xmin, xmax = ax.get_xlim()
@@ -106,9 +120,8 @@ def save_pairplots(df, algorithm, latent_dim):
             y_margin = 0.1 * (ymax - ymin)
             ax.set_xlim(xmin - x_margin, xmax + x_margin)
             ax.set_ylim(ymin - y_margin, ymax + y_margin)
-    g_rp.fig.suptitle(f'RP {algorithm} Pairplot', y=1.02, fontsize=16)
-    plt.savefig(f"{OUTPUT_PATH}/rp_{algorithm}_{latent_dim}d_pairplot.png", dpi=200, bbox_inches="tight")
-    plt.close()
+    g_rp.figure.savefig(f"{OUTPUT_PATH}/rp_{algorithm}_{latent_dim}d_pairplot.png", dpi=SAVE_DPI, bbox_inches="tight")
+    g_rp.figure.close()
 
 def run_umap(latent_dim, df_merged, wl_bp, wl_rp):
     import umap
@@ -171,13 +184,249 @@ def run_umap(latent_dim, df_merged, wl_bp, wl_rp):
     print(f"Archivo 'umap_{latent_dim}d_latent.parquet' generado con éxito.")
     save_pairplots(df_umap, "UMAP", latent_dim)
 
-def run_pca(latent_dim):
-    """Stub para futura implementación de PCA."""
-    print(f"[Stub] PCA pendiente de implementar (latent_dim={latent_dim})")
+def run_pca(latent_dim, df_merged):
+    import torch
 
-def run_ae(latent_dim):
-    """Stub para futura implementación de Autoencoder denso."""
-    print(f"[Stub] AE pendiente de implementar (latent_dim={latent_dim})")
+    print("Convirtiendo a tensores...")
+    BP = torch.tensor(df_merged["BP"].values, dtype=torch.float32)
+    RP = torch.tensor(df_merged["RP"].values, dtype=torch.float32)
+
+    print("Centrando los datos...")
+    BP_centered = BP - BP.mean(dim=0)
+    RP_centered = RP - RP.mean(dim=0)
+
+    print("Aplicando SVD...")
+    _, _, Vt_bp = torch.linalg.svd(BP_centered, full_matrices=False)
+    _, _, Vt_rp = torch.linalg.svd(RP_centered, full_matrices=False)
+
+    print("Reducciendo dimensionalidad...")
+    k = latent_dim
+    BP_reduced = BP_centered @ Vt_bp[:k].T
+    RP_reduced = RP_centered @ Vt_rp[:k].T
+
+    print("Convirtiendo a pandas...")
+    df_pca = pd.DataFrame({
+        "source_id": df_merged["source_id"].values,
+        **{f"BP_pca_{i+1}": BP_reduced[:, i].numpy() for i in range(k)},
+        **{f"RP_pca_{i+1}": RP_reduced[:, i].numpy() for i in range(k)}
+    })
+
+    df_pca.to_parquet(f"{OUTPUT_PATH}/pca_{latent_dim}d_latent.parquet", index=False)
+    print(f"Archivo 'pca_{latent_dim}d_latent.parquet' generado con éxito.")
+    save_pairplots(df_pca, "PCA", latent_dim)
+
+
+def run_ae(latent_dim, df_merged, wl_bp, wl_rp):
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    import torch.optim as optim
+    from torch.utils.data import DataLoader, TensorDataset
+
+    torch.manual_seed(SEED)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(SEED)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Usando device:", device)
+
+    bp_target = len(wl_bp)
+    rp_target = len(wl_rp)
+    bp_len = df_merged["BP"].apply(len)
+    rp_len = df_merged["RP"].apply(lambda x: len(x) if isinstance(x, (list, np.ndarray)) else -1)
+    mask = (bp_len == bp_target) & (rp_len == rp_target)
+    df_merged_clean = df_merged[mask].reset_index(drop=True)
+
+    print(f"Objetos válidos: {len(df_merged_clean)}")
+    print(f"Objetos descartados: {len(df_merged) - len(df_merged_clean)}")
+
+    print("Cargando datos...")
+    BP = torch.from_numpy(np.stack(df_merged_clean["BP"].values)).float()
+    RP = torch.from_numpy(np.stack(df_merged_clean["RP"].values)).float()
+
+    print("Centrando datos...")
+    BP = BP - BP.mean(dim=1, keepdim=True)
+    RP = RP - RP.mean(dim=1, keepdim=True)
+
+    BP = BP.to(device)
+    RP = RP.to(device)
+
+    batch_size = 256
+    loader_generator_bp = torch.Generator().manual_seed(SEED)
+    loader_generator_rp = torch.Generator().manual_seed(SEED)
+    pin_memory = torch.cuda.is_available()
+
+    train_loader_bp = DataLoader(
+        TensorDataset(BP, BP),
+        batch_size=batch_size,
+        shuffle=True,
+        generator=loader_generator_bp,
+        pin_memory=pin_memory,
+    )
+
+    train_loader_rp = DataLoader(
+        TensorDataset(RP, RP),
+        batch_size=batch_size,
+        shuffle=True,
+        generator=loader_generator_rp,
+        pin_memory=pin_memory,
+    )
+
+    def mlp_widths_descending(input_dim, target_dim):
+        """Tamaños decrecientes desde `input_dim` hasta `target_dim` (dimensión latente)."""
+        sizes = [input_dim]
+        x = input_dim
+        while x > target_dim:
+            nx = max(target_dim, (2 * x) // 3)
+            if nx >= x:
+                nx = max(target_dim, x - 1)
+            sizes.append(nx)
+            x = nx
+        if sizes[-1] != target_dim:
+            sizes.append(target_dim)
+        return sizes
+
+    class SpectraVAE(nn.Module):
+        def __init__(self, input_dim, latent_dim=3):
+            super().__init__()
+            self.input_dim = input_dim
+            self.latent_dim = latent_dim
+            widths = mlp_widths_descending(input_dim, latent_dim)
+            self._widths = widths
+
+            enc_layers = []
+            for i in range(len(widths) - 1):
+                enc_layers.extend(
+                    [nn.Linear(widths[i], widths[i + 1]), nn.LeakyReLU(0.1)]
+                )
+            self.encoder = nn.Sequential(*enc_layers)
+            bot = widths[-1]
+
+            self.fc_mu = nn.Linear(bot, latent_dim)
+            self.fc_logvar = nn.Linear(bot, latent_dim)
+
+            rev = list(reversed(widths))
+            dec_layers = [nn.Linear(latent_dim, rev[1])]
+            if len(rev) > 2:
+                dec_layers.append(nn.LeakyReLU(0.1))
+            for j in range(1, len(rev) - 1):
+                dec_layers.append(nn.Linear(rev[j], rev[j + 1]))
+                if j < len(rev) - 2:
+                    dec_layers.append(nn.LeakyReLU(0.1))
+            self.decoder = nn.Sequential(*dec_layers)
+
+        def encode(self, x):
+            h = self.encoder(x)
+            return self.fc_mu(h), self.fc_logvar(h)
+
+        @staticmethod
+        def reparameterize(mu, logvar):
+            std = torch.exp(0.5 * logvar)
+            eps = torch.randn_like(std)
+            return mu + eps * std
+
+        def decode(self, z):
+            return self.decoder(z)
+
+        def forward(self, x):
+            mu, logvar = self.encode(x)
+            z = self.reparameterize(mu, logvar)
+            x_rec = self.decode(z)
+            return x_rec, z, mu, logvar
+
+    def loss_vae(x_rec, x, mu, logvar):
+        recon = F.mse_loss(x_rec, x, reduction="mean")
+        kl = -0.5 * torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+        return recon + kl, recon, kl
+
+    def train_vae(model, loader, n_epochs=100, lr=1e-3):
+        model.train()
+        optimizer = optim.Adam(model.parameters(), lr=lr)
+
+        for epoch in range(n_epochs):
+            total_loss = 0.0
+            total_recon = 0.0
+            total_kl = 0.0
+
+            for x, _ in loader:
+                x = x.to(device, non_blocking=True)
+
+                optimizer.zero_grad()
+                x_rec, _, mu, logvar = model(x)
+                loss, recon, kl = loss_vae(x_rec, x, mu, logvar)
+                loss.backward()
+                optimizer.step()
+
+                total_loss += loss.item()
+                total_recon += recon.item()
+                total_kl += kl.item()
+
+            if (epoch + 1) % 10 == 0:
+                n = len(loader)
+                print(
+                    f"Epoch {epoch+1}/{n_epochs} "
+                    f"Loss: {total_loss / n:.3e} "
+                    f"(recon: {total_recon / n:.3e}, KL: {total_kl / n:.3e})"
+                )
+
+    print(
+        f"Creando VAE: BP input_dim={bp_target}, RP input_dim={rp_target} "
+        f"(latent_dim={latent_dim})..."
+    )
+    vae_bp = SpectraVAE(bp_target, latent_dim).to(device)
+    vae_rp = SpectraVAE(rp_target, latent_dim).to(device)
+
+    print("Entrenando VAE BP...")
+    train_vae(vae_bp, train_loader_bp, n_epochs=100)
+
+    print("Entrenando VAE RP...")
+    train_vae(vae_rp, train_loader_rp, n_epochs=100)
+
+    print("Obteniendo representaciones latentes (media del codificador) y error de reconstrucción...")
+    vae_bp.eval()
+    vae_rp.eval()
+
+    with torch.no_grad():
+        mu_bp, _ = vae_bp.encode(BP)
+        x_rec_bp = vae_bp.decode(mu_bp)
+        BP_latent = mu_bp
+        BP_errors = torch.norm(BP - x_rec_bp, dim=1)
+
+        mu_rp, _ = vae_rp.encode(RP)
+        x_rec_rp = vae_rp.decode(mu_rp)
+        RP_latent = mu_rp
+        RP_errors = torch.norm(RP - x_rec_rp, dim=1)
+
+    BP_latent = BP_latent.cpu()
+    RP_latent = RP_latent.cpu()
+    BP_errors = BP_errors.cpu()
+    RP_errors = RP_errors.cpu()
+
+    print("Guardando modelos...")
+    torch.save(vae_bp.state_dict(), f"{OUTPUT_PATH}/ae_{latent_dim}d_bp.pth")
+    torch.save(vae_rp.state_dict(), f"{OUTPUT_PATH}/ae_{latent_dim}d_rp.pth")
+
+    print("Guardando representaciones latentes...")
+
+    df_autoenc = pd.DataFrame({
+        "source_id": df_merged_clean["source_id"].values,
+        **{f"BP_latent_{i+1}": BP_latent[:, i].numpy() for i in range(latent_dim)},
+        **{f"RP_latent_{i+1}": RP_latent[:, i].numpy() for i in range(latent_dim)},
+        "BP_error_rec": BP_errors.numpy(),
+        "RP_error_rec": RP_errors.numpy(),
+        "MG": df_merged_clean["MG"].values,
+        "BP_RP": df_merged_clean["BP_RP"].values,
+    })
+
+
+    df_autoenc.to_parquet(
+        f"{OUTPUT_PATH}/ae_{latent_dim}d_latent.parquet",
+        index=False
+    )
+
+    print(f"Archivo 'ae_{latent_dim}d_latent.parquet' generado con éxito.")
+    save_pairplots(df_autoenc, "AE", latent_dim)
+
 
 def run_ae_conv(latent_dim, df_merged, wl_bp, wl_rp):
     import torch
@@ -619,7 +868,7 @@ if SELECTED_ALGORITHM == "UMAP":
 elif SELECTED_ALGORITHM == "PCA":
     run_pca(LATENT_DIM)
 elif SELECTED_ALGORITHM == "AE":
-    run_ae(LATENT_DIM)
+    run_ae(LATENT_DIM, df_merged, wl_bp, wl_rp)
 elif SELECTED_ALGORITHM == "AE_CONV":
     run_ae_conv(LATENT_DIM, df_merged, wl_bp, wl_rp)
 else:
